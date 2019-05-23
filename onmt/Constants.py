@@ -9,6 +9,8 @@ UNK_WORD = '<unk>'
 BOS_WORD = '<s>'
 EOS_WORD = '</s>'
 
+voc_start =4
+
 checkpointing = 0
 static = False
 residual_type = 'regular'

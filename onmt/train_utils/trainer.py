@@ -17,6 +17,8 @@ import numpy as np
 from onmt.multiprocessing.multiprocessing_wrapper import MultiprocessingRunner
 from onmt.ModelConstructor import init_model_parameters
 from onmt.utils import checkpoint_paths
+from torch.distributions import Categorical
+import torch.nn.functional as F
 
 
 
@@ -144,6 +146,10 @@ class XETrainer(BaseTrainer):
                         prob distribution from decoder generator
                 """
 
+                if(self.opt.sample_target_order):
+                    self.sample_target_order(batch)
+
+
                 outputs = self.model(batch)
                 targets = batch.get('target_output')
                 tgt_mask = targets.ne(onmt.Constants.PAD)
@@ -202,6 +208,12 @@ class XETrainer(BaseTrainer):
             oom = False
             try:
 
+                if(self.opt.sample_target_order):
+                    #print ("Before:",batch.get("target_input").t()[0])
+                    #print ("Before:",batch.get("target_output").t()[0])
+                    self.sample_target_order(batch)
+                    #print ("After:",batch.get("target_input").t()[0])
+                    #print ("After:",batch.get("target_output").t()[0])
                 # outputs is a dictionary containing keys/values necessary for loss function
                 # can be flexibly controlled within models for easier extensibility
                 outputs = self.model(batch)
@@ -285,6 +297,94 @@ class XETrainer(BaseTrainer):
                     start = time.time()
 
         return total_loss / total_words
+
+
+    def sample_target_order(self,batch):
+        target = batch.get("target_output")
+        batch_size = batch.size
+        voc_size = self.dicts['tgt'].size()
+
+        pad_tensor = torch.zeros(voc_size, dtype=torch.uint8)
+        if (self.cuda):
+            pad_tensor = pad_tensor.cuda()
+        pad_tensor[onmt.Constants.PAD] = 1
+
+        eos_tensor = torch.zeros(voc_size, dtype=torch.uint8)
+        if (self.cuda):
+            eos_tensor = eos_tensor.cuda()
+        eos_tensor[onmt.Constants.EOS] = 1
+
+
+        history_mask = torch.zeros([batch_size,target.size(0)],dtype=torch.uint8)
+        shuffle = []
+
+        for i in range(target.size(0)):
+
+            #Select possible words
+            mask = torch.ones([batch_size, voc_size], dtype=torch.uint8)
+            #Probability only for normal words
+            mask.narrow(1,0,onmt.Constants.voc_start).zero_()
+
+            #check if already at end of sentence
+            m =  target[i].ne(onmt.Constants.PAD)
+            mask = mask * m.unsqueeze(1).expand(-1,voc_size).type_as(mask)
+            mask = mask + (1-m).unsqueeze(1).expand(-1,voc_size).type_as(mask)*pad_tensor.unsqueeze(0).expand(batch.size,-1)
+
+            #check if eos
+            m =  target[i].ne(onmt.Constants.EOS)
+            mask = mask * m.unsqueeze(1).expand(-1,voc_size).type_as(mask)
+            mask = mask + (1-m).unsqueeze(1).expand(-1,voc_size).type_as(mask)*eos_tensor.unsqueeze(0).expand(batch.size,-1)
+
+            if(self.cuda):
+                mask = mask.cuda()
+
+
+            # get word probabiliy distribution
+            if (self.opt.sample_target_distribution == "uniform"):
+                log_probs = torch.ones([batch_size, voc_size], dtype=torch.float64)
+            else:
+                # sample only on position, take uniform here
+                log_probs = torch.ones([batch_size, voc_size], dtype=torch.float64)
+
+            log_probs.masked_fill_(1-mask,-float('inf'))
+
+            #filter to target vocabulary
+            word_probs = log_probs.gather(1,target.t())
+
+            #add position distribution
+            if (self.opt.sample_target_distribution == "outsideInside"):
+                probs = torch.zeros(word_probs.size(), dtype=torch.float64).fill_(-float('inf'))
+                if(i % 2== 0):
+                    probs.narrow(1,int(i/2),1).fill_(0)
+                else:
+                    length = target.ne(onmt.Constants.PAD).sum(0)
+                    index = (length -2 - int(i/2)).unsqueeze(1)
+                    probs.scatter_(1,index,0)
+                #mask eos and padding
+                m = target[i].eq(onmt.Constants.PAD) + target[i].eq(onmt.Constants.EOS)
+                probs.masked_fill_(m.unsqueeze(1).expand(-1,probs.size(1)),0)
+                word_probs += probs
+
+            word_probs.masked_fill_(history_mask,-float('inf'))
+
+            m = Categorical(probs=F.softmax(word_probs,dim=-1))
+            sample = m.sample().unsqueeze(1)
+            #print(sample.t())
+            shuffle.append(sample.t())
+            history_mask.scatter_(1,sample,torch.ones(sample.size(), dtype=torch.uint8))
+
+            #index and direction
+
+
+            #
+        #print(shuffle[0])
+        mapping=torch.cat(shuffle)
+        new_target = target.gather(0,mapping)
+        batch.tensors["target_output"] = new_target
+        target_input = batch.tensors["target_input"]
+        target_input[1:,:] = new_target[:-1,:]
+        batch.tensors["target_input"] = target_input
+        batch.tensors["mapping"] = mapping
 
     def run(self, save_file=None):
         

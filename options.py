@@ -192,5 +192,11 @@ def make_parser(parser):
     parser.add_argument('-fusion', action='store_true',
                         help='Use fusion training with language model')
 
+    # for sampling
+    parser.add_argument('-sample_target_order', action='store_true',
+                        help='Sample target order')
+    parser.add_argument('-sample_target_distribution', default='uniform', type=str,
+                        help='Sampling distribution')
+
     
     return parser
