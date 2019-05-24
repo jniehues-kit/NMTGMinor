@@ -309,56 +309,56 @@ class XETrainer(BaseTrainer):
             pad_tensor = pad_tensor.cuda()
         pad_tensor[onmt.Constants.PAD] = 1
 
-        eos_tensor = torch.zeros(voc_size, dtype=torch.uint8)
+        eos_tensor = torch.zeros(voc_size)
         if (self.cuda):
             eos_tensor = eos_tensor.cuda()
         eos_tensor[onmt.Constants.EOS] = 1
 
 
-        history_mask = torch.zeros([batch_size,target.size(0)],dtype=torch.uint8)
+        history_mask = torch.zeros([batch_size,target.size(0)], dtype=torch.uint8)
         shuffle = []
+        log_probs = torch.ones([batch_size, voc_size], dtype=torch.float64)
+        if(self.cuda):
+            log_probs = log_probs.cuda()
+            history_mask = history_mask.cuda()
+        probs = torch.zeros(target.t().size()).type_as(log_probs)
 
         for i in range(target.size(0)):
 
-            #Select possible words
-            mask = torch.ones([batch_size, voc_size], dtype=torch.uint8)
-            #Probability only for normal words
-            mask.narrow(1,0,onmt.Constants.voc_start).zero_()
-
-            #check if already at end of sentence
-            m =  target[i].ne(onmt.Constants.PAD)
-            mask = mask * m.unsqueeze(1).expand(-1,voc_size).type_as(mask)
-            mask = mask + (1-m).unsqueeze(1).expand(-1,voc_size).type_as(mask)*pad_tensor.unsqueeze(0).expand(batch.size,-1)
-
-            #check if eos
-            m =  target[i].ne(onmt.Constants.EOS)
-            mask = mask * m.unsqueeze(1).expand(-1,voc_size).type_as(mask)
-            mask = mask + (1-m).unsqueeze(1).expand(-1,voc_size).type_as(mask)*eos_tensor.unsqueeze(0).expand(batch.size,-1)
-
-            if(self.cuda):
-                mask = mask.cuda()
-
-
+ 
             # get word probabiliy distribution
             if (self.opt.sample_target_distribution == "uniform"):
-                log_probs = torch.ones([batch_size, voc_size], dtype=torch.float64)
+                log_probs.fill_(1)
             else:
                 # sample only on position, take uniform here
-                log_probs = torch.ones([batch_size, voc_size], dtype=torch.float64)
+                log_probs.fill_(1)
 
-            log_probs.masked_fill_(1-mask,-float('inf'))
+            #Probability only for normal words
+            log_probs.narrow(1,0,onmt.Constants.voc_start).fill_(-float('inf'))
 
             #filter to target vocabulary
             word_probs = log_probs.gather(1,target.t())
 
+
+            #check if already at end of sentence or eos -> all prob to current poisition
+            mask =  (target[i].eq(onmt.Constants.PAD) +  target[i].eq(onmt.Constants.EOS)).unsqueeze(1).expand(-1,word_probs.size(1))
+            oneHot = torch.zeros(1,target.size(0)).type_as(history_mask)
+            oneHot[0,i] = 1
+
+            if(self.cuda):
+                mask = mask.cuda()
+
+            word_probs.masked_fill_(mask,-float('inf'))
+            word_probs.masked_fill_(mask*oneHot.expand(batch_size,-1),1)
+
             #add position distribution
             if (self.opt.sample_target_distribution == "outsideInside"):
-                probs = torch.zeros(word_probs.size(), dtype=torch.float64).fill_(-float('inf'))
+                probs.fill_(-float('inf'))
                 if(i % 2== 0):
                     probs.narrow(1,int(i/2),1).fill_(0)
                 else:
                     length = target.ne(onmt.Constants.PAD).sum(0)
-                    index = (length -2 - int(i/2)).unsqueeze(1)
+                    index = (length -2 - int(i/2)).clamp_(0,target.size(0)).unsqueeze(1)
                     probs.scatter_(1,index,0)
                 #mask eos and padding
                 m = target[i].eq(onmt.Constants.PAD) + target[i].eq(onmt.Constants.EOS)
@@ -371,7 +371,8 @@ class XETrainer(BaseTrainer):
             sample = m.sample().unsqueeze(1)
             #print(sample.t())
             shuffle.append(sample.t())
-            history_mask.scatter_(1,sample,torch.ones(sample.size(), dtype=torch.uint8))
+            #ones = torch.ones(sample.size()).type_as(pad_tensor)
+            history_mask.scatter_(1,sample,1)
 
             #index and direction
 
