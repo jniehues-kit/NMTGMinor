@@ -155,7 +155,11 @@ class XETrainer(BaseTrainer):
                 tgt_mask = targets.ne(onmt.Constants.PAD)
                 outputs['tgt_mask'] = tgt_mask
 
-                loss_dict = self.loss_function(outputs, targets, model=self.model,
+                if self.opt.predict_position == "relative":
+                    loss_dict = self.loss_function(outputs, targets, model=self.model,
+                                                   backward=False,pos_targets=batch.get('mapping'))
+                else:
+                    loss_dict = self.loss_function(outputs, targets, model=self.model,
                                                backward=False)
                 loss_data = loss_dict['data']
 
@@ -188,6 +192,7 @@ class XETrainer(BaseTrainer):
             iteration = 0
 
         total_loss, total_words = 0, 0
+        pos_loss_data,ce_loss_data = 0,0
         report_loss, report_tgt_words = 0, 0
         report_src_words = 0
         start = time.time()
@@ -228,7 +233,13 @@ class XETrainer(BaseTrainer):
                 
                 normalizer = 1
 
-                loss_dict = self.loss_function(outputs, targets, model=self.model,
+                if self.opt.predict_position == "relative":
+                    loss_dict = self.loss_function(outputs, targets, model=self.model,
+                                                   backward=True,pos_targets=batch.get('mapping'))
+                    pos_loss_data += loss_dict['pos_data']
+                    ce_loss_data += loss_dict['ce_data']
+                else:
+                    loss_dict = self.loss_function(outputs, targets, model=self.model,
                                                backward=True, normalizer=normalizer)
                 loss_data = loss_dict['data']
 
@@ -291,6 +302,8 @@ class XETrainer(BaseTrainer):
                            report_src_words/(time.time()-start),
                            report_tgt_words/(time.time()-start),
                            str(datetime.timedelta(seconds=int(time.time() - self.start_time)))))
+                    if(self.opt.predict_position == "relative"):
+                        print(("POS Loss %6.2f, CE LOSS %6.2f") % (pos_loss_data,ce_loss_data))
 
                     report_loss, report_tgt_words = 0, 0
                     report_src_words = 0
@@ -375,7 +388,7 @@ class XETrainer(BaseTrainer):
         target_input = batch.tensors["target_input"]
         target_input[1:,:] = new_target[:-1,:]
         batch.tensors["target_input"] = target_input
-        batch.tensors["mapping"] = mapping
+        batch.tensors["mapping"] = mapping.t().float()/(batch.get('tgt_length').float().unsqueeze(1).expand(-1,target.size(0)) - 2)
 
     def run(self, save_file=None):
         

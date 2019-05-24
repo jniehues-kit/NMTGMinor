@@ -197,6 +197,9 @@ def make_parser(parser):
                         help='Sample target order')
     parser.add_argument('-sample_target_distribution', default='uniform', type=str,
                         help='Sampling distribution')
+    parser.add_argument('-predict_position', default='none', type=str,
+                        help='Sampling distribution')
+
 
     
     return parser

@@ -244,6 +244,108 @@ class NMTAndCTCLossFunc(_Loss):
         self.ctc_loss = self.ctc_loss.cuda()
         return self
 
+class POSLossFunc(_Loss):
+    """
+    Standard NMT Loss Computation.
+    """
+
+    def __init__(self, output_size, label_smoothing=0.0, shard_size=1):
+        super(POSLossFunc, self).__init__(output_size)
+        self.mse = nn.MSELoss()
+
+
+    def forward(self, model_outputs, targets, model=None, backward=False, normalizer=1, **kwargs):
+        """
+        Args:
+
+            model_outputs: a dictionary containing the predictive output from the model.
+                                                      time x batch x vocab_size
+                                                   or time x batch x hidden_size
+            targets: the validate target to compare output with. time x batch
+            model: passing the model in for necessary components
+            backward: to control if we should perform backward pass (to free the graph) or not
+            normalizer: the denominator of the loss before backward
+            **kwargs(optional): additional info for computing loss.
+        """
+        outputs = model_outputs['hidden']
+        # flatten the output
+        outputs = outputs.contiguous().view(-1, outputs.size(-1))
+        targets = targets.view(-1)
+
+        mask = model_outputs['tgt_mask']
+
+        if mask is not None:
+            """ We remove all positions with PAD """
+            flattened_mask = mask.view(-1)
+
+            non_pad_indices = torch.nonzero(flattened_mask).squeeze(1)
+
+            clean_input = outputs.index_select(0, non_pad_indices)
+
+            clean_targets = targets.index_select(0, non_pad_indices)
+
+        else:
+            clean_input = outputs
+            clean_targets = targets
+
+        if model is not None:
+            # the 'first' generator is the decoder softmax one
+            dists = model.generator[1](clean_input)
+        else:
+            dists = clean_input
+        #loss, loss_data = self.mse(dists, clean_targets.unsqueeze(1))
+        loss = self.mse(dists, clean_targets.unsqueeze(1))
+        if backward:
+            loss.div(normalizer).backward()
+
+        output_dict = {"loss": loss, "data": loss.data.item()}
+
+        # return loss, loss_data, None
+        return output_dict
+
+
+
+class NMTAndPOSLossFunc(_Loss):
+    """
+    Standard NMT Loss Computation.
+    """
+
+    def __init__(self, output_size, label_smoothing=0.0):
+        super(NMTAndPOSLossFunc, self).__init__(output_size)
+        self.ce_loss = NMTLossFunc(output_size,label_smoothing)
+        self.pos_loss = POSLossFunc(1)
+
+    def forward(self, model_outputs, targets, model=None, backward=False, normalizer=1, pos_targets=None,**kwargs):
+        """
+        Args:
+
+            model_outputs: a dictionary containing the predictive output from the model.
+                                                      time x batch x vocab_size
+                                                   or time x batch x hidden_size
+            targets: the validate target to compare output with. time x batch
+            model: passing the model in for necessary components
+            backward: to control if we should perform backward pass (to free the graph) or not
+            normalizer: the denominator of the loss before backward
+            **kwargs(optional): additional info for computing loss.
+        """
+        ce_loss = self.ce_loss(model_outputs, targets, model,False, normalizer)
+        pos_loss = self.pos_loss(model_outputs, pos_targets, model, False, normalizer)
+
+        loss = pos_loss['loss'] + ce_loss['loss']
+        loss_data = pos_loss['data'] + ce_loss['data']
+
+        if backward:
+            loss.div(normalizer).backward()
+
+        output_dict = {"loss": loss, "data": loss_data,"pos_data":pos_loss['data'], "ce_data":ce_loss['data']}
+
+        return output_dict
+
+    def cuda(self):
+        self.ce_loss = self.ce_loss.cuda()
+        self.ctc_loss = self.ctc_loss.cuda()
+        return self
+
 
 class FusionLoss(CrossEntropyLossBase):
 

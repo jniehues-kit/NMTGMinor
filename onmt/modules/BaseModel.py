@@ -31,7 +31,32 @@ class Generator(nn.Module):
         else:
             output = logits
         return output
-        
+
+
+class RelativePositionGenerator(Generator):
+
+    def __init__(self, hidden_size, output_size):
+
+        super(Generator, self).__init__()
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        # ~ self.linear = onmt.modules.Transformer.Layers.XavierLinear(hidden_size, output_size)
+        self.linear = nn.Linear(hidden_size, output_size)
+
+        stdv = 1. / math.sqrt(self.linear.weight.size(1))
+
+        torch.nn.init.uniform_(self.linear.weight, -stdv, stdv)
+
+        self.linear.bias.data.zero_()
+
+    def forward(self, input, log_softmax=True):
+
+        # added float to the end
+        # print(input.size())
+        logits = self.linear(input).float()
+
+        return F.sigmoid(logits)
+
 
 class NMTModel(nn.Module):
 

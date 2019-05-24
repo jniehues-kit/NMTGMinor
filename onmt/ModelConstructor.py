@@ -76,7 +76,10 @@ def build_tm_model(opt, dicts):
 
     if opt.ctc_loss != 0:
         generators.append(onmt.modules.BaseModel.Generator(opt.model_size, dicts['tgt'].size() + 1))
-    
+    if(opt.predict_position == "relative"):
+        generators.append(onmt.modules.BaseModel.RelativePositionGenerator(opt.model_size,1));
+
+
     if opt.model == 'transformer':
         # raise NotImplementedError
 
