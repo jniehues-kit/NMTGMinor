@@ -563,13 +563,14 @@ class PositionalEncoding(nn.Module):
         out:   batch_size x len_seq x d_model
         
     """
-    def __init__(self, d_model, p=0, len_max=512):
+    def __init__(self, d_model, p=0, len_max=512,order="lefttoright"):
         # save a fixed positional embedding matrix up to len_max,
         # so that no need to recreate it everytime
         super(PositionalEncoding, self).__init__()
         self.len_max=len_max
         self.d_model = d_model
         self.data_type = None
+        self.order = order
 
         self.renew(len_max)
         
@@ -582,7 +583,12 @@ class PositionalEncoding(nn.Module):
         if hasattr(self, 'pos_emb'):
             cuda = self.pos_emb.is_cuda
             del self.pos_emb
-        position = torch.arange(0,new_max_len).float()
+
+        if(self.order == "lefttoright"):
+            position = torch.arange(0,new_max_len).float()
+        elif(self.order == "outsideInside"):
+            position = torch.arange(0,new_max_len/2).float()
+            position = torch.stack([position,-1* torch.arange(1,new_max_len/2+1).float()],1).view(-1)
 
 
         num_timescales = self.d_model // 2
@@ -590,7 +596,7 @@ class PositionalEncoding(nn.Module):
         inv_timescales = torch.exp(torch.arange(0, num_timescales).float() * -log_timescale_increment)
         scaled_time = position.unsqueeze(1) * inv_timescales.unsqueeze(0)
         pos_emb = torch.cat((torch.sin(scaled_time), torch.cos(scaled_time)), 1)
-        
+
         if cuda:
             pos_emb = pos_emb.cuda()
 

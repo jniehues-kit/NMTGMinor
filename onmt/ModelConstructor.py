@@ -64,6 +64,12 @@ def build_tm_model(opt, dicts):
     else:
         raise NotImplementedError
 
+    enc_pos_encoder = positional_encoder;
+    dec_pos_encoder = positional_encoder;
+    if(opt.sample_target_distribution == "outsideInside"):
+        dec_pos_encoder = PositionalEncoding(opt.model_size, len_max=MAX_LEN,order="outsideInside")
+
+
 
     # BUILD GENERATOR
     generators = [onmt.modules.BaseModel.Generator(opt.model_size, dicts['tgt'].size())]
@@ -77,11 +83,11 @@ def build_tm_model(opt, dicts):
         onmt.Constants.init_value = opt.param_init
 
         if opt.encoder_type == "text":
-            encoder = TransformerEncoder(opt, dicts['src'], positional_encoder)
+            encoder = TransformerEncoder(opt, dicts['src'], enc_pos_encoder)
         else:
-            encoder = TransformerEncoder(opt, opt.input_size, positional_encoder)
+            encoder = TransformerEncoder(opt, opt.input_size, enc_pos_encoder)
 
-        decoder = TransformerDecoder(opt, dicts['tgt'], positional_encoder)
+        decoder = TransformerDecoder(opt, dicts['tgt'], dec_pos_encoder)
 
         model = Transformer(encoder, decoder, nn.ModuleList(generators))
 
@@ -93,11 +99,11 @@ def build_tm_model(opt, dicts):
         onmt.Constants.init_value = opt.param_init
         
         if opt.encoder_type == "text":
-            encoder = StochasticTransformerEncoder(opt, dicts['src'], positional_encoder)
+            encoder = StochasticTransformerEncoder(opt, dicts['src'], enc_pos_encoder)
         else:
-            encoder = StochasticTransformerEncoder(opt, opt.input_size, positional_encoder)
+            encoder = StochasticTransformerEncoder(opt, opt.input_size, enc_pos_encoder)
 
-        decoder = StochasticTransformerDecoder(opt, dicts['tgt'], positional_encoder)
+        decoder = StochasticTransformerDecoder(opt, dicts['tgt'], dec_pos_encoder)
 
         model = Transformer(encoder, decoder, nn.ModuleList(generators))
 
@@ -112,8 +118,8 @@ def build_tm_model(opt, dicts):
 
         time_encoder = TimeEncoding(opt.model_size, len_max=32)
 
-        encoder = UniversalTransformerEncoder(opt, dicts['src'], positional_encoder, time_encoder)
-        decoder = UniversalTransformerDecoder(opt, dicts['tgt'], positional_encoder, time_encoder)
+        encoder = UniversalTransformerEncoder(opt, dicts['src'], enc_pos_encoder, time_encoder)
+        decoder = UniversalTransformerDecoder(opt, dicts['tgt'], dec_pos_encoder, time_encoder)
 
         model = Transformer(encoder, decoder, nn.ModuleList(generators))
 

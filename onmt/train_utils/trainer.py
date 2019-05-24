@@ -304,16 +304,6 @@ class XETrainer(BaseTrainer):
         batch_size = batch.size
         voc_size = self.dicts['tgt'].size()
 
-        pad_tensor = torch.zeros(voc_size, dtype=torch.uint8)
-        if (self.cuda):
-            pad_tensor = pad_tensor.cuda()
-        pad_tensor[onmt.Constants.PAD] = 1
-
-        eos_tensor = torch.zeros(voc_size)
-        if (self.cuda):
-            eos_tensor = eos_tensor.cuda()
-        eos_tensor[onmt.Constants.EOS] = 1
-
 
         history_mask = torch.zeros([batch_size,target.size(0)], dtype=torch.uint8)
         shuffle = []
