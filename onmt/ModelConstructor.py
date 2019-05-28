@@ -61,13 +61,18 @@ def build_tm_model(opt, dicts):
     # BUILD POSITIONAL ENCODING
     if opt.time == 'positional_encoding':
         positional_encoder = PositionalEncoding(opt.model_size, len_max=MAX_LEN)
+    elif opt.time == 'learned_relative_position':
+        positional_encoder = PositionalEncoding(opt.model_size, len_max=MAX_LEN)
     else:
         raise NotImplementedError
 
     enc_pos_encoder = positional_encoder;
-    dec_pos_encoder = positional_encoder;
-    if(opt.sample_target_distribution == "outsideInside"):
+    if opt.time == 'learned_relative_position':
+        dec_pos_encoder = None
+    elif(opt.sample_target_distribution == "outsideInside"):
         dec_pos_encoder = PositionalEncoding(opt.model_size, len_max=MAX_LEN,order="outsideInside")
+    else:
+        dec_pos_encoder = positional_encoder
 
 
 
@@ -92,7 +97,7 @@ def build_tm_model(opt, dicts):
 
         decoder = TransformerDecoder(opt, dicts['tgt'], dec_pos_encoder)
 
-        model = Transformer(encoder, decoder, nn.ModuleList(generators))
+        model = Transformer(encoder, decoder, nn.ModuleList(generators),opt.time)
 
     elif opt.model == 'stochastic_transformer':
         

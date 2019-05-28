@@ -388,7 +388,9 @@ class XETrainer(BaseTrainer):
         target_input = batch.tensors["target_input"]
         target_input[1:,:] = new_target[:-1,:]
         batch.tensors["target_input"] = target_input
-        batch.tensors["mapping"] = mapping.t().float()/(batch.get('tgt_length').float().unsqueeze(1).expand(-1,target.size(0)) - 2)
+        mapping = mapping.t().float()/(batch.get('tgt_length').float().unsqueeze(1).expand(-1,target.size(0)) - 2)
+        batch.tensors["mapping"] = mapping
+        batch.tensors["mapping_input"] = torch.cat([torch.zeros(mapping.size(0),1).fill_(-1).type_as(mapping),mapping[:,:-1]],1)
 
     def run(self, save_file=None):
         
