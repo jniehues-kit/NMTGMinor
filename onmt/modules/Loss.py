@@ -331,8 +331,10 @@ class NMTAndPOSLossFunc(_Loss):
         ce_loss = self.ce_loss(model_outputs, targets, model,False, normalizer)
         pos_loss = self.pos_loss(model_outputs, pos_targets, model, False, normalizer)
 
-        loss = pos_loss['loss'] + ce_loss['loss']
-        loss_data = pos_loss['data'] + ce_loss['data']
+        scale = 1000.0
+
+        loss = scale * pos_loss['loss'] + ce_loss['loss']
+        loss_data = scale * pos_loss['data'] + ce_loss['data']
 
         if backward:
             loss.div(normalizer).backward()
@@ -343,7 +345,7 @@ class NMTAndPOSLossFunc(_Loss):
 
     def cuda(self):
         self.ce_loss = self.ce_loss.cuda()
-        self.ctc_loss = self.ctc_loss.cuda()
+        self.pos_loss = self.pos_loss.cuda()
         return self
 
 
