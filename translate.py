@@ -314,8 +314,6 @@ def translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, p
             print("PRED SCORE: %.4f" %  predScore[b][0])
             if(len(pos_probs) > 0):
                 print("PRED POSITIONS", " ".join([str(pos_probs[0][0][i].item()) for i in range(pos_probs[0][0].size(0))]))
-                print(len(predBatch[b][0]))
-                print(len([pos_probs[0][0][i].item() for i in range(pos_probs[0][0].size(0))]))
                 print("PRED",count," in order:",end=" ")
                 for t in sorted(zip([pos_probs[0][0][i].item() for i in range(pos_probs[0][0].size(0))][:-1],predBatch[b][0])):
                     print(t[1],end=" ")

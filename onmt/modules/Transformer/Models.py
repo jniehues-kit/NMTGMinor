@@ -300,9 +300,18 @@ class TransformerDecoder(nn.Module):
 
         if self.time == 'positional_encoding':
             emb = emb * math.sqrt(self.model_size)
-        """ Adding positional encoding """
-        if self.time == 'positional_encoding':
+            """ Adding positional encoding """
             emb = self.time_transformer(emb, t=input.size(1))
+        elif self.time == 'learned_relative_position':
+            pos_probs = decoder_state.pos_probs
+            emb = emb * math.sqrt(self.model_size)
+
+            num_timescales = self.model_size // 2
+            log_timescale_increment = math.log(10000) / (num_timescales - 1)
+            inv_timescales = torch.exp(torch.arange(0, num_timescales).type_as(emb) * -log_timescale_increment)
+            scaled_time = (torch.tensor(pos_probs).type_as(emb)*100).unsqueeze(1) * inv_timescales.unsqueeze(0)
+            pos_emb = torch.cat((torch.sin(scaled_time), torch.cos(scaled_time)), 1).unsqueeze(1)
+            emb = emb + pos_emb
         else:
             # prev_h = buffer[0] if buffer is None else None
             # emb = self.time_transformer(emb, prev_h)
@@ -511,6 +520,7 @@ class TransformerDecodingState(DecoderState):
 
         self.input_seq = None
         self.attention_buffers = dict()
+        self.pos_probs = torch.tensor([-1]*beam_size*src.size(1)).float()
         self.model_size = model_size
 
     def update_attention_buffer(self, buffer, layer):
@@ -529,6 +539,10 @@ class TransformerDecodingState(DecoderState):
 
             sent_states.copy_(sent_states.index_select(
                 1, beam[b].getCurrentOrigin()))
+
+
+        if(len(beam[b].pos_probs) > 0):
+            self.pos_probs.view(self.beam_size, remaining_sents)[:, idx] = beam[b].pos_probs[0].squeeze(1)
 
         for l in self.attention_buffers:
             buffer_ = self.attention_buffers[l]
@@ -558,6 +572,16 @@ class TransformerDecodingState(DecoderState):
             new_size[-2] = new_size[-2] * len(active_idx) // remaining_sents
             return view.index_select(1, active_idx).view(*new_size)
 
+        def update_active_probs(t):
+            if t is None:
+                return t
+            # select only the remaining active sentences
+            view = t.data.view(-1, remaining_sents)
+            new_size = list(t.size())
+            new_size[-1] = new_size[-1] * len(active_idx) // remaining_sents
+            return view.index_select(1, active_idx).view(*new_size)
+
+
         def update_active_2d(t):
             if t is None:
                 return t
@@ -572,6 +596,8 @@ class TransformerDecodingState(DecoderState):
         self.input_seq = update_active_2d(self.input_seq)
 
         self.src = update_active_2d(self.src)
+
+        self.pos_probs = update_active_probs(self.pos_probs)
 
         for l in self.attention_buffers:
             buffer_ = self.attention_buffers[l]

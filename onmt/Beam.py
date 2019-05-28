@@ -48,7 +48,7 @@ class Beam(object):
         "Get the backpointers for the current timestep."
         return self.prevKs[-1]
 
-    def advance(self, wordLk, attnOut,pos_probs=None):
+    def advance(self, wordLk, attnOut,pos_probs=torch.tensor([])):
         """
         Given prob over words for every last beam `wordLk` and attention
         `attnOut`: Compute and update the beam search.
@@ -80,7 +80,7 @@ class Beam(object):
         self.prevKs.append(prevK)
         self.nextYs.append(bestScoresId - prevK * numWords)
         self.attn.append(attnOut.index_select(0, prevK))
-        if pos_probs :
+        if pos_probs.size(0) > 0:
             self.pos_probs.append(pos_probs.index_select(0, prevK))
 
         # End condition is when top-of-beam is EOS.

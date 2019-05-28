@@ -60,7 +60,7 @@ class EnsembleTranslator(object):
 
             model.load_state_dict(checkpoint['model'])
             
-            if model_opt.model in model_list:
+            if model_opt.model in model_list and model_opt.time == "positional_encoding":
                 # if model.decoder.positional_encoder.len_max < self.opt.max_sent_length:
                 #     print("Not enough len to decode. Renewing .. ")
                 #     model.decoder.renew_buffer(self.opt.max_sent_length)
@@ -320,12 +320,14 @@ class EnsembleTranslator(object):
             attn = self._combineAttention(attns)
             pos_prob = self._combinePosProbs(pos_probs)
 
+
             wordLk = out.view(beam_size, remaining_sents, -1) \
                         .transpose(0, 1).contiguous()
             attn = attn.view(beam_size, remaining_sents, -1) \
                        .transpose(0, 1).contiguous()
             pos_prob = pos_prob.view(beam_size, remaining_sents, -1) \
                        .transpose(0, 1).contiguous()
+
 
             active = []
             
@@ -351,7 +353,6 @@ class EnsembleTranslator(object):
             for j in range(self.n_models):
                 decoder_states[j].prune_complete_beam(active_idx, remaining_sents)
             remaining_sents = len(active)
-            
         #  (4) package everything up
         all_hyp, all_scores, all_attn ,all_pos_probs = [], [], [], []
         n_best = self.opt.n_best
