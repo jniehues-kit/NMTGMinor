@@ -51,7 +51,7 @@ class TransformerEncoder(nn.Module):
                                          self.model_size,
                                          padding_idx=onmt.Constants.PAD)
 
-        if opt.time == 'positional_encoding':
+        if opt.time == 'positional_encoding' or opt.time == 'learned_relative_position':
             self.time_transformer = positional_encoder
         elif opt.time == 'gru':
             self.time_transformer = nn.GRU(self.model_size, self.model_size, 1, batch_first=True)
@@ -152,6 +152,8 @@ class TransformerDecoder(nn.Module):
 
         if opt.time == 'positional_encoding':
             self.time_transformer = positional_encoder
+        elif opt.time == 'learned_relative_position':
+                self.time_transformer = positional_encoder
         else:
             raise NotImplementedError
         # elif opt.time == 'gru':
@@ -169,7 +171,10 @@ class TransformerDecoder(nn.Module):
 
         self.positional_encoder = positional_encoder
 
-        len_max = self.positional_encoder.len_max
+        if(opt.time == 'learned_relative_position'):
+            len_max = onmt.Constants.max_position_length
+        else:
+            len_max = self.positional_encoder.len_max
         mask = torch.ByteTensor(np.triu(np.ones((len_max,len_max)), k=1).astype('uint8'))
         self.register_buffer('mask', mask)
 
@@ -188,7 +193,7 @@ class TransformerDecoder(nn.Module):
         mask = torch.ByteTensor(np.triu(np.ones((new_len,new_len)), k=1).astype('uint8'))
         self.register_buffer('mask', mask)
 
-    def forward(self, input, context, src, **kwargs):
+    def forward(self, input, context, src, mapping=None,**kwargs):
         """
         Inputs Shapes:
             input: (Variable) batch_size x len_tgt (wanna tranpose)
@@ -204,10 +209,21 @@ class TransformerDecoder(nn.Module):
 
 
         emb = embedded_dropout(self.word_lut, input, dropout=self.word_dropout if self.training else 0)
+
         if self.time == 'positional_encoding':
             emb = emb * math.sqrt(self.model_size)
-        """ Adding positional encoding """
-        emb = self.time_transformer(emb)
+            """ Adding positional encoding """
+            emb = self.time_transformer(emb)
+        elif self.time == 'learned_relative_position':
+            emb = emb * math.sqrt(self.model_size)
+
+            num_timescales = self.model_size // 2
+            log_timescale_increment = math.log(10000) / (num_timescales - 1)
+            inv_timescales = torch.exp(torch.arange(0, num_timescales).type_as(emb) * -log_timescale_increment)
+            scaled_time = (mapping*100).unsqueeze(2) * inv_timescales.unsqueeze(0).unsqueeze(0)
+            pos_emb = torch.cat((torch.sin(scaled_time), torch.cos(scaled_time)), 2)
+            emb = emb + pos_emb
+
         if isinstance(emb, tuple):
             emb = emb[0]
         emb = self.preprocess_layer(emb)
@@ -340,9 +356,10 @@ class TransformerDecoder(nn.Module):
 class Transformer(NMTModel):
     """Main model in 'Attention is all you need' """
 
-    def __init__(self, encoder, decoder, generator=None):
+    def __init__(self, encoder, decoder, generator=None,time="positional_encoding"):
         super().__init__( encoder, decoder, generator)
         self.model_size = self.decoder.model_size
+        self.time = time
 
     def forward(self, batch):
         """
@@ -363,8 +380,12 @@ class Transformer(NMTModel):
         
         encoder_output = self.encoder(src)
         context = encoder_output['context']
-        
-        decoder_output = self.decoder(tgt, context, src)
+
+        mapping = None
+        if(self.time == 'learned_relative_position'):
+            mapping = batch.get('mapping_input')
+
+        decoder_output = self.decoder(tgt, context, src,mapping=mapping)
         output = decoder_output['hidden']
 
         output_dict = defaultdict(lambda: None)
