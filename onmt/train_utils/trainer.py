@@ -304,6 +304,7 @@ class XETrainer(BaseTrainer):
                            str(datetime.timedelta(seconds=int(time.time() - self.start_time)))))
                     if(self.opt.predict_position == "relative"):
                         print(("POS Loss %6.2f, CE LOSS %6.2f") % (pos_loss_data,ce_loss_data))
+                        pos_loss_data,ce_loss_data = 0, 0
 
                     report_loss, report_tgt_words = 0, 0
                     report_src_words = 0
