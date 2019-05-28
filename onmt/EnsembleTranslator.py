@@ -21,6 +21,8 @@ class EnsembleTranslator(object):
         self.start_with_bos = opt.start_with_bos
         self.fp16 = opt.fp16
 
+        self.predict_position = 'none'
+
         self.models = list()
         self.model_types = list()
         
@@ -38,14 +40,17 @@ class EnsembleTranslator(object):
                                map_location=lambda storage, loc: storage)
                                
             model_opt = checkpoint['opt']
-            
+
+
             if i == 0:
                 if "src" in checkpoint['dicts']:
                     self.src_dict = checkpoint['dicts']['src']
                 else:
                     self._type = "audio"
                 self.tgt_dict = checkpoint['dicts']['tgt']
-            
+                if hasattr(model_opt, "predict_position"):
+                    self.predict_position = model_opt.predict_position
+
             # Build model from the saved option
             if hasattr(model_opt, 'fusion') and model_opt.fusion == True:
                 print("* Loading a FUSION model")
@@ -188,6 +193,17 @@ class EnsembleTranslator(object):
         
         return attn
 
+    def _combinePosProbs(self, pos):
+
+        p = pos[0]
+
+        for i in range(1, len(pos)):
+            p += pos[i]
+
+        p.div(len(pos))
+
+        return p
+
     def build_data(self, src_sents, tgt_sents):
         # This needs to be the same as preprocess.py.
         
@@ -276,14 +292,19 @@ class EnsembleTranslator(object):
             # require batch first for everything
             outs = dict()
             attns = dict()
-            
+            pos_probs = dict()
+
             for k in range(self.n_models):
                 # decoder_hidden, coverage = self.models[k].decoder.step(decoder_input.clone(), decoder_states[k])
-                decoder_output = self.models[k].step(decoder_input.clone(), decoder_states[k])
+                if(self.predict_position):
+                    decoder_output = self.models[k].step(decoder_input.clone(), decoder_states[k],predict_position=True)
+                else:
+                    decoder_output = self.models[k].step(decoder_input.clone(), decoder_states[k])
+
 
                 outs[k] = decoder_output['log_prob']
                 attns[k] = decoder_output['coverage']
-
+                pos_probs[k] = decoder_output['pos_log_prob']
                 # outs[k] = self.models[k].generator[0](decoder_hidden)
                 # take the last decoder state
                 # decoder_hidden = decoder_hidden.squeeze(1)
@@ -297,12 +318,15 @@ class EnsembleTranslator(object):
             
             out = self._combineOutputs(outs)
             attn = self._combineAttention(attns)
-                
+            pos_prob = self._combinePosProbs(pos_probs)
+
             wordLk = out.view(beam_size, remaining_sents, -1) \
                         .transpose(0, 1).contiguous()
             attn = attn.view(beam_size, remaining_sents, -1) \
                        .transpose(0, 1).contiguous()
-                       
+            pos_prob = pos_prob.view(beam_size, remaining_sents, -1) \
+                       .transpose(0, 1).contiguous()
+
             active = []
             
             for b in range(batch_size):
@@ -310,7 +334,7 @@ class EnsembleTranslator(object):
                     continue
                 
                 idx = batch_idx[b]
-                if not beam[b].advance(wordLk.data[idx], attn.data[idx]):
+                if not beam[b].advance(wordLk.data[idx], attn.data[idx],pos_prob.data[idx]):
                     active += [b]
                     
                 for j in range(self.n_models):
@@ -329,7 +353,7 @@ class EnsembleTranslator(object):
             remaining_sents = len(active)
             
         #  (4) package everything up
-        all_hyp, all_scores, all_attn = [], [], []
+        all_hyp, all_scores, all_attn ,all_pos_probs = [], [], [], []
         n_best = self.opt.n_best
         all_lengths = []
 
@@ -337,7 +361,7 @@ class EnsembleTranslator(object):
             scores, ks = beam[b].sortBest()
 
             all_scores += [scores[:n_best]]
-            hyps, attn, length = zip(*[beam[b].getHyp(k) for k in ks[:n_best]])
+            hyps, attn, pos_probs, length = zip(*[beam[b].getHyp(k) for k in ks[:n_best]])
             all_hyp += [hyps]
             all_lengths += [length]
             # if(src_data.data.dim() == 3):
@@ -349,6 +373,8 @@ class EnsembleTranslator(object):
                                             .nonzero().squeeze(1)
             attn = [a.index_select(1, valid_attn) for a in attn]
             all_attn += [attn]
+            if(pos_probs):
+                all_pos_probs +=[pos_probs]
 
             if self.beam_accum:
                 self.beam_accum["beam_parent_ids"].append(
@@ -364,7 +390,7 @@ class EnsembleTranslator(object):
 
         torch.set_grad_enabled(True)
 
-        return all_hyp, all_scores, all_attn, all_lengths, gold_scores, gold_words, allgold_scores
+        return all_hyp, all_scores, all_attn, all_pos_probs, all_lengths, gold_scores, gold_words, allgold_scores
 
     def translate(self, src_data, tgt_data):
         #  (1) convert words to indexes
@@ -375,7 +401,7 @@ class EnsembleTranslator(object):
         batch_size = batch.size
 
         #  (2) translate
-        pred, pred_score, attn, pred_length, gold_score, gold_words, allgold_words = self.translate_batch(batch)
+        pred, pred_score, attn, all_pos_probs, pred_length, gold_score, gold_words, allgold_words = self.translate_batch(batch)
 
         #  (3) convert indexes to words
         predBatch = []
@@ -385,7 +411,7 @@ class EnsembleTranslator(object):
                  for n in range(self.opt.n_best)]
             )
 
-        return predBatch, pred_score, pred_length, gold_score, gold_words,allgold_words
+        return predBatch, pred_score, pred_length, gold_score, gold_words,allgold_words,all_pos_probs
 
     def translateASR(self, src_data, tgt_data):
         #  (1) convert words to indexes
@@ -397,7 +423,7 @@ class EnsembleTranslator(object):
         batch_size = batch.size
 
         #  (2) translate
-        pred, pred_score, attn, pred_length, gold_score, gold_words,allgold_words = self.translate_batch(batch)
+        pred, pred_score, attn, all_pos_probs, pred_length, gold_score, gold_words,allgold_words = self.translate_batch(batch)
 
         #  (3) convert indexes to words
         predBatch = []
@@ -407,6 +433,6 @@ class EnsembleTranslator(object):
                  for n in range(self.opt.n_best)]
             )
 
-        return predBatch, pred_score, pred_length, gold_score, gold_words,allgold_words
+        return predBatch, pred_score, pred_length, gold_score, gold_words,allgold_words,all_pos_probs
 
 

@@ -444,7 +444,7 @@ class Transformer(NMTModel):
     def renew_buffer(self, new_len):
         self.decoder.renew_buffer(new_len)
 
-    def step(self, input_t, decoder_state):
+    def step(self, input_t, decoder_state,predict_position=False):
         """
         Decoding function:
         generate new decoder output based on the current input and current decoder state
@@ -457,6 +457,8 @@ class Transformer(NMTModel):
         hidden, coverage = self.decoder.step(input_t, decoder_state)
 
         log_prob = self.generator[0](hidden.squeeze(1))
+        if predict_position:
+            pos_log_prob = self.generator[1](hidden.squeeze(1))
 
         last_coverage = coverage[:, -1, :].squeeze(1)
 
@@ -464,6 +466,8 @@ class Transformer(NMTModel):
 
         output_dict['log_prob'] = log_prob
         output_dict['coverage'] = last_coverage
+        if predict_position:
+            output_dict['pos_log_prob'] = pos_log_prob
 
         return output_dict
 

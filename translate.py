@@ -200,10 +200,10 @@ def main():
                 continue
 
             print("Batch size:",len(srcBatch),len(tgtBatch))
-            predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores  = translator.translateASR(srcBatch, tgtBatch)
+            predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores ,pos_probs = translator.translateASR(srcBatch, tgtBatch)
 
             print("Result:",len(predBatch))
-            count,predScore,predWords,goldScore,goldWords = translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, predScore, predLength, goldScore, numGoldWords, allGoldScores,opt.input_type)
+            count,predScore,predWords,goldScore,goldWords = translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, predScore, predLength, goldScore, numGoldWords, allGoldScores,opt.input_type,pos_probs)
             predScoreTotal += predScore
             predWordsTotal += predWords
             goldScoreTotal += goldScore
@@ -215,7 +215,7 @@ def main():
             predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores  = translator.translateASR(srcBatch,
                                                                                     tgtBatch)
             print("Result:",len(predBatch))
-            count,predScore,predWords,goldScore,goldWords = translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores,opt.input_type)
+            count,predScore,predWords,goldScore,goldWords = translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores,opt.input_type, pos_probs)
             predScoreTotal += predScore
             predWordsTotal += predWords
             goldScoreTotal += goldScore
@@ -251,7 +251,7 @@ def main():
                     break
 
             # actually done beam search from the model
-            predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores  = translator.translate(srcBatch,
+            predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores ,pos_probs = translator.translate(srcBatch,
                                                                                     tgtBatch)
 
             # convert output tensor to words
@@ -259,7 +259,7 @@ def main():
                                                                            srcBatch,tgtBatch,
                                                                            predBatch, predScore, predLength,
                                                                            goldScore, numGoldWords,
-                                                                           allGoldScores,opt.input_type)
+                                                                           allGoldScores,opt.input_type, pos_probs)
             predScoreTotal += predScore
             predWordsTotal += predWords
             goldScoreTotal += goldScore
@@ -277,7 +277,7 @@ def main():
     if opt.dump_beam:
         json.dump(translator.beam_accum, open(opt.dump_beam, 'w'))
 
-def translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores,input_type):
+def translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, predScore, predLength, goldScore, numGoldWords,allGoldScores,input_type,pos_probs):
     if opt.normalize:
         predBatch_ = []
         predScore_ = []
@@ -312,7 +312,14 @@ def translateBatch(opt,tgtF,count,outF,translator,srcBatch,tgtBatch,predBatch, p
         if opt.verbose:
             print('PRED %d: %s' % (count, getSentenceFromTokens(predBatch[b][0], input_type)))
             print("PRED SCORE: %.4f" %  predScore[b][0])
-
+            if(len(pos_probs) > 0):
+                print("PRED POSITIONS", " ".join([str(pos_probs[0][0][i].item()) for i in range(pos_probs[0][0].size(0))]))
+                print(len(predBatch[b][0]))
+                print(len([pos_probs[0][0][i].item() for i in range(pos_probs[0][0].size(0))]))
+                print("PRED",count," in order:",end=" ")
+                for t in sorted(zip([pos_probs[0][0][i].item() for i in range(pos_probs[0][0].size(0))][:-1],predBatch[b][0])):
+                    print(t[1],end=" ")
+                print()
             if tgtF is not None:
                 tgtSent = getSentenceFromTokens(tgtBatch[b], input_type)
                 if translator.tgt_dict.lower:
