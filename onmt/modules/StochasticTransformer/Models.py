@@ -41,12 +41,12 @@ class StochasticTransformerEncoder(TransformerEncoder):
         
     """
     
-    def __init__(self, opt, dicts, positional_encoder):
+    def __init__(self, opt, dicts, positional_encoder,encoder_type):
 
         self.death_rate = opt.death_rate
         
         # build_modules will be called from the inherited constructor
-        super(StochasticTransformerEncoder, self).__init__(opt, dicts, positional_encoder)
+        super(StochasticTransformerEncoder, self).__init__(opt, dicts, positional_encoder,encoder_type)
 
         e_length = expected_length(self.layers, self.death_rate)
         

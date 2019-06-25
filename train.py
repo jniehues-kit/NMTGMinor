@@ -108,19 +108,29 @@ def main():
         for i in range(len(add_data)):
             if add_format[i] == 'raw':
                 if add_data[i].endswith(".train.pt"):
-                    print("Loading data from '%s'" % opt.data)
+                    print("Loading data from '%s'" % add_data[i])
                     add_dataset = torch.load(add_data[i])
                 else:
-                    print("Loading data from %s" % opt.data + ".train.pt")
+                    print("Loading data from %s" % add_data[i] + ".train.pt")
                     add_dataset = torch.load(add_data[i] + ".train.pt")
 
                 additional_data.append(onmt.Dataset(add_dataset['train']['src'],
-                                          dataset['train']['tgt'], opt.batch_size_words,
-                                          data_type=dataset.get("type", "text"),
+                                          add_dataset['train']['tgt'], opt.batch_size_words,
+                                          data_type=add_dataset.get("type", "text"),
                                           batch_size_sents=opt.batch_size_sents,
                                           multiplier=opt.batch_size_multiplier,
                                           reshape_speech=opt.reshape_speech,
                                           augment=opt.augment_speech))
+                add_dicts = add_dataset['dicts']
+
+                for d in ['src','tgt']:
+                    if(d in dicts):
+                        if(d in add_dicts):
+                            assert (dicts[d].size() == add_dicts[d].size())
+                    else:
+                        if (d in add_dicts):
+                            dicts[d] = add_dicts[d]
+
             elif add_format[i] == 'bin':
 
                 from onmt.data_utils.IndexedDataset import IndexedInMemoryDataset

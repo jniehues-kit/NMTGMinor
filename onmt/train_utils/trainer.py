@@ -254,7 +254,11 @@ class XETrainer(BaseTrainer):
 
                 except RuntimeError as e:
                     if 'out of memory' in str(e):
-                        print('| WARNING: ran out of memory on GPU , skipping batch')
+                        print('| WARNING: ran out of memory on GPU , skipping batch with size'+str(batch_size))
+                        print(batch.get('source').size())
+                        print(batch.get('target_input').size())
+                        print(batch.get("tgt_length").min(), batch.get("tgt_length").max())
+                        exit;
                         oom = True
                         torch.cuda.empty_cache()
                     else:
@@ -398,7 +402,6 @@ class XETrainer(BaseTrainer):
         self.additional_data_iteration = []
         for i in range(len(self.additional_data)):
             self.additional_data_iteration.append(0)
-            self.additional_data[i].shuffle()
             self.additional_batch_order.append(self.additional_data[i].create_order())
 
     

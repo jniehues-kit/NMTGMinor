@@ -146,19 +146,34 @@ def build_tm_model(opt, dicts):
     for g in model.generator:
         init.xavier_uniform_(g.linear.weight)
 
+        
+
     if opt.encoder_type == "audio":
         init.xavier_uniform_(model.encoder.audio_trans.weight.data)
         if opt.init_embedding == 'xavier':
             init.xavier_uniform_(model.decoder.word_lut.weight)
         elif opt.init_embedding == 'normal':
             init.normal_(model.decoder.word_lut.weight, mean=0, std=opt.model_size ** -0.5)
-    else:
+    elif opt.encoder_type == "text":
         if opt.init_embedding == 'xavier':
             init.xavier_uniform_(model.encoder.word_lut.weight)
             init.xavier_uniform_(model.decoder.word_lut.weight)
         elif opt.init_embedding == 'normal':
             init.normal_(model.encoder.word_lut.weight, mean=0, std=opt.model_size ** -0.5)
             init.normal_(model.decoder.word_lut.weight, mean=0, std=opt.model_size ** -0.5)
+    elif opt.encoder_type == "mix":
+        init.xavier_uniform_(model.encoder.audio_encoder.audio_trans.weight.data)
+        if opt.init_embedding == 'xavier':
+            init.xavier_uniform_(model.encoder.text_encodedr.word_lut.weight)
+            init.xavier_uniform_(model.decoder.word_lut.weight)
+        elif opt.init_embedding == 'normal':
+            init.normal_(model.encoder.text_encoder.word_lut.weight, mean=0, std=opt.model_size ** -0.5)
+            init.normal_(model.decoder.word_lut.weight, mean=0, std=opt.model_size ** -0.5)
+
+    else:
+        print ("Unkown encoder type:",opt.encoder_type)
+        exit(-1)
+
 
     return model
 

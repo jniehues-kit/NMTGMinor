@@ -20,7 +20,11 @@ def custom_layer(module):
 class MixedEncoder(nn.Module):
 
 
-    def __init(self,text_encoder,audio_encoder):
+    def __init__(self,text_encoder,audio_encoder):
+
+        super(MixedEncoder, self).__init__()
+
+
         self.text_encoder = text_encoder
         self.audio_encoder = audio_encoder
 
@@ -217,7 +221,7 @@ class TransformerDecoder(nn.Module):
         mask = torch.ByteTensor(np.triu(np.ones((new_len,new_len)), k=1).astype('uint8'))
         self.register_buffer('mask', mask)
 
-    def forward(self, input, context, src, **kwargs):
+    def forward(self, input, context, src, src_type, **kwargs):
         """
         Inputs Shapes:
             input: (Variable) batch_size x len_tgt (wanna tranpose)
@@ -242,7 +246,7 @@ class TransformerDecoder(nn.Module):
         emb = self.preprocess_layer(emb)
 
         if context is not None:
-            if self.encoder_type == "audio":
+            if src_type == "audio":
                 mask_src = src.data.narrow(2, 0, 1).squeeze(2).eq(onmt.Constants.PAD).unsqueeze(1)
                 pad_mask_src = src.data.narrow(2, 0, 1).squeeze(2).ne(onmt.Constants.PAD)  # batch_size x len_src
             else:
@@ -388,6 +392,7 @@ class Transformer(NMTModel):
         """
         src = batch.get('source')
         tgt = batch.get('target_input')
+        src_type = batch.src_type
 
         src = src.transpose(0, 1)  # transpose to have batch first
         tgt = tgt.transpose(0, 1)
@@ -395,7 +400,7 @@ class Transformer(NMTModel):
         encoder_output = self.encoder(src)
         context = encoder_output['context']
         
-        decoder_output = self.decoder(tgt, context, src)
+        decoder_output = self.decoder(tgt, context, src,src_type)
         output = decoder_output['hidden']
 
         output_dict = defaultdict(lambda: None)
@@ -419,6 +424,7 @@ class Transformer(NMTModel):
         src = batch.get('source')
         tgt_input = batch.get('target_input')
         tgt_output = batch.get('target_output')
+        src_type = batch.src_type
 
         # transpose to have batch first
         src = src.transpose(0, 1)
@@ -435,7 +441,7 @@ class Transformer(NMTModel):
         gold_words = 0
         allgold_scores = list()
 
-        decoder_output = self.decoder(tgt_input, context, src)['hidden']
+        decoder_output = self.decoder(tgt_input, context, src,src_type)['hidden']
 
         output = decoder_output
 
