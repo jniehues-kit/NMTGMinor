@@ -28,6 +28,8 @@ class BaseTrainer(object):
         self.start_time = 0
 
         self.additional_data = []
+        self.additional_batch_order = []
+        self.additional_data_iteration = []
 
     def add_additional_data(self,d,ratio):
         self.additional_data = d
@@ -218,7 +220,6 @@ class XETrainer(BaseTrainer):
                     for k in range(self.additional_data_ratio[j+1]):
                         if self.additional_data_iteration[j] == len(self.additional_data[j]):
                             self.additional_data_iteration[j] = 0
-                            self.additional_data[j].shuffle()
                             self.additional_batch_order[j] = self.additional_data[j].create_order()
 
                         batches.append(self.additional_data[j].next()[0])
