@@ -348,12 +348,13 @@ class XETrainer(BaseTrainer):
                     iteration = 0
                 opt.start_epoch = int(math.floor(float(checkpoint['epoch'] + 1)))
                 resume=True
-                if(len(self.additional_data) > 0):
-                    if 'additional_batch_order' in checkpoint:
-                        self.additional_batch_order = checkpoint['additional_batch_order']
-                        self.additional_data_iteration = checkpoint['additional_data_iteration']
-                    else:
+                if 'additional_batch_order' in checkpoint:
+                    self.additional_batch_order = checkpoint['additional_batch_order']
+                    self.additional_data_iteration = checkpoint['additional_data_iteration']
+                    if (len(self.additional_data_iteration) != len(self.additional_data)):
                         self.init_additional_data()
+                else:
+                    self.init_additional_data()
             else:
                 batch_order = None
                 iteration = 0

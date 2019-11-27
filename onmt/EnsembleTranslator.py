@@ -335,6 +335,12 @@ class EnsembleTranslator(object):
                     continue
 
                 idx = batch_idx[b]
+                #if(i == 0):
+                    #word_lk.data[idx][0][28] = -1000
+                #    word_lk.data[idx] *= 1000
+                #    word_lk.data[idx][0][28] = 0
+                  
+
                 if not beam[b].advance(word_lk.data[idx], attn.data[idx]):
                     active += [b]
 
