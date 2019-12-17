@@ -24,6 +24,9 @@ class EnsembleTranslator(object):
         self.models = list()
         self.model_types = list()
 
+        self.limit_encoder_representation = opt.limit_encoder_representation;
+
+
         # models are string with | as delimiter
         models = opt.model.split("|")
 
@@ -280,7 +283,7 @@ class EnsembleTranslator(object):
         decoder_states = dict()
 
         for i in range(self.n_models):
-            decoder_states[i] = self.models[i].create_decoder_state(batch, beam_size)
+            decoder_states[i] = self.models[i].create_decoder_state(batch, beam_size,self.limit_encoder_representation)
 
         if self.opt.lm:
             lm_decoder_states = self.lm_model.create_decoder_state(batch, beam_size)

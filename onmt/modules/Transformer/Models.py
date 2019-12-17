@@ -7,7 +7,7 @@ import onmt
 from onmt.modules.WordDrop import embedded_dropout
 from torch.utils.checkpoint import checkpoint
 from collections import defaultdict
-
+import torch.nn.functional as F
 
 def custom_layer(module):
     def custom_forward(*args):
@@ -183,6 +183,11 @@ class TransformerDecoder(nn.Module):
         self.encoder_type = opt.encoder_type
         self.ignore_source = ignore_source
 
+        self.encoder_compression = 0
+        if(opt.encoder_compression == "Dropout"):
+            self.encoder_compression = 1
+        self.encoder_compression_dropout = opt.encoder_compression_dropout
+
         if opt.time == 'positional_encoding':
             self.time_transformer = positional_encoder
         else:
@@ -256,6 +261,15 @@ class TransformerDecoder(nn.Module):
         else:
             mask_src = None
             pad_mask_src = None
+
+
+        if(self.encoder_compression == 1 and self.training):
+            rand = pad_mask_src.clone().float().uniform_(0,1)
+            comp_mask = rand.le(self.encoder_compression_dropout)
+            comp_mask[:,0] = 0 # do not mask first element
+            comp_mask = comp_mask.cumsum(1)
+            mask_src = (mask_src | comp_mask.ge(1).unsqueeze(1).byte())
+            pad_mask_src = (1-mask_src).squeeze(1)
 
         len_tgt = input.size(1)
         mask_tgt = input.data.eq(onmt.Constants.PAD).unsqueeze(1) + self.mask[:len_tgt, :len_tgt]
@@ -343,6 +357,10 @@ class TransformerDecoder(nn.Module):
                 mask_src = src.eq(onmt.Constants.PAD).unsqueeze(1)
         else:
             mask_src = None
+
+
+        if(decoder_state.limit_encoder_representation > 0):
+            mask_src = mask_src[:,:,:decoder_state.limit_encoder_representation]
 
         len_tgt = input.size(1)
         mask_tgt = input.data.eq(onmt.Constants.PAD).unsqueeze(1) + self.mask[:len_tgt, :len_tgt]
@@ -481,6 +499,9 @@ class Transformer(NMTModel):
         # squeeze to remove the time step dimension
         log_prob = self.generator[0](hidden.squeeze(0))
 
+        if(coverage.size(-1) != decoder_state.src.size(0)):
+            coverage = F.pad(input=coverage, pad=(0, decoder_state.src.size(0)-coverage.size(-1), 0, 0,0,0), mode='constant', value=0)
+
         last_coverage = coverage[:, -1, :].squeeze(1)
 
         output_dict = defaultdict(lambda: None)
@@ -491,7 +512,7 @@ class Transformer(NMTModel):
         
         return output_dict
 
-    def create_decoder_state(self, batch, beam_size=1):
+    def create_decoder_state(self, batch, beam_size=1,limit_encoder_representation=0):
         """
         Generate a new decoder state based on the batch input
         :param batch: Batch object (may not contain target during decoding)
@@ -503,9 +524,19 @@ class Transformer(NMTModel):
         src_transposed = src.transpose(0, 1)
         encoder_output = self.encoder(src_transposed)
 
+        if(limit_encoder_representation > 0):
+            #print(encoder_output['context'].size());
+            #print(encoder_output['src_mask'].size());
+            encoder_output['context'] = encoder_output['context'][:limit_encoder_representation]
+            encoder_output['src_mask'] = encoder_output['src_mask'][:,:,:limit_encoder_representation]
+            #print(encoder_output['context'].size());
+            #print(encoder_output['src_mask'].size());
+            
+
         decoder_state = TransformerDecodingState(src, encoder_output['context'],
                                                  beam_size=beam_size, model_size=self.model_size)
 
+        decoder_state.limit_encoder_representation = limit_encoder_representation
         return decoder_state
 
 
@@ -532,6 +563,7 @@ class TransformerDecodingState(DecoderState):
         self.input_seq = None
         self.attention_buffers = dict()
         self.model_size = model_size
+        self.limit_encoder_representation = 0
 
     def update_attention_buffer(self, buffer, layer):
 

@@ -40,6 +40,12 @@ def build_model(opt, dicts):
     if not hasattr(opt, 'fusion'):
         opt.fusion = False
 
+    if not hasattr(opt, 'encoder_compression'):
+        opt.encoder_compression = 0
+
+    if not hasattr(opt, 'encoder_compression_dropout'):
+        opt.encoder_compression_dropout = 0.2
+
     onmt.Constants.layer_norm = opt.layer_norm
     onmt.Constants.weight_norm = opt.weight_norm
     onmt.Constants.activation_layer = opt.activation_layer

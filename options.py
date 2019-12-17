@@ -209,4 +209,12 @@ def make_parser(parser):
                         help='Use f/t augmentation for speech')
 
 
+    parser.add_argument('-encoder_compression', default='None',type=str,
+                        help='Compress encoder representation, None/Dropout')
+    parser.add_argument('-encoder_compression_dropout', default=0.2,type=float,
+                        help='Compress encoder representation, None/Dropout')
+
+
+    
+
     return parser

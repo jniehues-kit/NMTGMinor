@@ -37,6 +37,8 @@ parser.add_argument('-encoder_type', default='text',
                     help="Type of encoder to use. Options are [text|img|audio].")
 parser.add_argument('-previous_context', type=int, default=0,
                     help="Number of previous sentence for context")
+parser.add_argument('-limit_encoder_representation', type=int, default=0,
+                    help="Max number of vectors exchanged between encoder and decoder")
 
 parser.add_argument('-tgt',
                     help='True target sequence (optional)')
