@@ -8,32 +8,30 @@ from onmt.modules.Linear import XavierLinear, group_linear, FeedForward
 from onmt.modules.MaxOut import MaxOut
 from onmt.modules.GlobalAttention import MultiHeadAttention
 from onmt.modules.PrePostProcessing import PrePostProcessing
+from onmt.modules.VariationalDropout import VariationalDropout
 from collections import defaultdict
 
 Linear = XavierLinear
 
 
-def variational_dropout(input, p, training=False):
-    """Applies Variational Dropout (query, key, value)
-    Inputs:
-        input: Variable - batch_size * time_steps * hidden
-    """
-    if training:
-        bsize = input.size(0)
-        hsize = input.size(2)
-        
-        # create a mask for one time step
-        mask = Variable(input.data.new(bsize, hsize).bernoulli_(1 - p).div_(1 - p), requires_grad=False)
-        
-        # then expand it to all time steps 
-        mask = mask.unsqueeze(1).expand_as(input)
-        output = input * mask
-        return output
-    # if eval then return the input
-    return input
+class StochasticModule(nn.Module):
+
+    def stochastic_roll(self, death_rate):
+
+        if self.stochastic and self.training:
+            seed = torch.rand(1)
+
+            if self.training:
+                coin = (seed[0].item() >= death_rate)
+            else:
+                coin = True
+
+            return coin
+        else:
+            return True
 
 
-class EncoderLayer(nn.Module):
+class EncoderLayer(StochasticModule):
     """Wraps multi-head attentions and position-wise feed forward into one encoder layer
     
     Args:
@@ -56,10 +54,10 @@ class EncoderLayer(nn.Module):
         out: batch_size x len_query x d_model
     """
     
-    def __init__(self, h, d_model, p, d_ff, attn_p=0.1, residual_p=0.1, version=1.0):
+    def __init__(self, h, d_model, p, d_ff, attn_p=0.1, residual_p=0.1,
+                 stochastic=False, death_rate=0.0):
         super(EncoderLayer, self).__init__()
-        self.version = version
-        
+
         self.preprocess_attn = PrePostProcessing(d_model, 0.0, sequence='n')
         self.postprocess_attn = PrePostProcessing(d_model, residual_p, sequence='da', static=onmt.Constants.static)
         self.preprocess_ffn = PrePostProcessing(d_model, 0.0, sequence='n')
@@ -73,27 +71,43 @@ class EncoderLayer(nn.Module):
             k = int(math.ceil(d_ff / d_model))
             feedforward = MaxOut(d_model, d_model, k)
         self.feedforward = Bottle(feedforward)
+        self.stochastic = stochastic
+        self.death_rate = death_rate
             
     def forward(self, input, attn_mask, pad_mask=None, return_norm_input=False):
 
-        pad_mask = None
-        query = self.preprocess_attn(input)
-        out, _ = self.multihead(query, query, query, attn_mask)
-        input = self.postprocess_attn(out, input)
-        
-        """ Feed forward layer 
-            layernorm > ffn > dropout > residual
-        """
-        out = self.feedforward(self.preprocess_ffn(input))
-        input = self.postprocess_ffn(out, input)
-        
-        if not return_norm_input:
-            return input
+        if self.stochastic_roll(self.death_rate):
+            # The input to the layer should be in T x B x H format
+            query = self.preprocess_attn(input)
+            out, _ = self.multihead(query, query, query, attn_mask)
+
+            if self.training and self.stochastic:
+                out = out / ( 1 - self.death_rate)
+
+            input = self.postprocess_attn(out, input)
+
+            """ Feed forward layer 
+                layernorm > ffn > dropout > residual
+            """
+            out = self.feedforward(self.preprocess_ffn(input))
+
+            if self.training and self.stochastic:
+                out = out / ( 1 - self.death_rate)
+
+            input = self.postprocess_ffn(out, input)
+
+            if not return_norm_input:
+                return input
+            else:
+                return input, query
         else:
-            return input, query
+            if not return_norm_input:
+                return input
+            else:
+                return input, None
     
 
-class DecoderLayer(nn.Module):
+class DecoderLayer(StochasticModule):
     """Wraps multi-head attentions and position-wise feed forward into one layer of decoder
     
     Args:
@@ -122,10 +136,13 @@ class DecoderLayer(nn.Module):
     """    
     
     def __init__(self, h, d_model, p, d_ff, attn_p=0.1, residual_p=0.1,
-                                   ignore_source=False, encoder_to_share=None, copy_attention=False):
+                 ignore_source=False, encoder_to_share=None, copy_attention=False,
+                 stochastic=False, death_rate=0.0):
         super(DecoderLayer, self).__init__()
         self.ignore_source = ignore_source
         self.copy_attention = copy_attention
+        self.stochastic = stochastic
+        self.death_rate = death_rate
         
         if encoder_to_share is None:
 
@@ -171,48 +188,64 @@ class DecoderLayer(nn.Module):
         
         """ Self attention layer 
             layernorm > attn > dropout > residual
+            The input to the layer should be in T x B x H format
         """
-
         output = defaultdict(lambda: None)
 
-        query = self.preprocess_attn(input)
-        
-        self_context = query
-        
-        out, _ = self.multihead_tgt(query, self_context, self_context, mask_tgt)
-        
-        input = self.postprocess_attn(out, input)
+        if self.stochastic_roll(self.death_rate):
+            query = self.preprocess_attn(input)
 
-        """ Context Attention layer 
-            layernorm > attn > dropout > residual
-        """
-        if not self.ignore_source:
-            query = self.preprocess_src_attn(input)
+            self_context = query
 
-            out, coverage = self.multihead_src(query, context, context, mask_src)
-            output['attn_out'] = out
-            input = self.postprocess_src_attn(out, input)
+            out, _ = self.multihead_tgt(query, self_context, self_context, mask_tgt)
 
+            if self.training and self.stochastic:
+                out = out / ( 1 - self.death_rate)
+
+            input = self.postprocess_attn(out, input)
+
+            """ Context Attention layer 
+                layernorm > attn > dropout > residual
+            """
+            if not self.ignore_source:
+                query = self.preprocess_src_attn(input)
+
+                out, coverage = self.multihead_src(query, context, context, mask_src)
+
+                if self.training and self.stochastic:
+                    out = out / (1 - self.death_rate)
+
+                output['attn_out'] = out
+                input = self.postprocess_src_attn(out, input)
+
+            else:
+                coverage = None
+
+            """ Feed forward layer 
+                layernorm > ffn > dropout > residual
+            """
+            normalized_input = self.preprocess_ffn(input)
+
+            """
+                note: "attn_out" represents the weight sum of the source representation
+                for stability's sake: combining with the input and normalized
+                output['attn_out'] = input
+            """
+            out = self.feedforward(normalized_input)
+
+            if self.training and self.stochastic:
+                out = out / ( 1 - self.death_rate)
+
+            input = self.postprocess_ffn(out, input)
+
+            output['final_state'] = input
+            output['coverage'] = coverage
         else:
-            coverage = None
-
-        """ Feed forward layer 
-            layernorm > ffn > dropout > residual
-        """
-        normalized_input = self.preprocess_ffn(input)
-
-        # note: "attn_out" represents the weight sum of the source representation
-        # for stability's sake: combining with the input and normalized
-        # output['attn_out'] = input
-        out = self.feedforward(normalized_input)
-        input = self.postprocess_ffn(out, input)
-
-        output['final_state'] = input
-        output['coverage'] = coverage
+            output['final_state'] = input
+            output['coverage'] = input.new(input.size(1), input.size(0), context.size(0)).zero_()
 
         return output
-        # return input, coverage
-        
+
     def step(self, input, context, mask_tgt, mask_src, pad_mask_tgt=None, pad_mask_src=None, buffer=None):
         """ Self attention layer 
             layernorm > attn > dropout > residual
@@ -303,10 +336,10 @@ class PositionalEncoding(nn.Module):
             self.renew(len_seq)
         
         if word_emb.size(1) == len_seq:
-            out = word_emb + Variable(self.pos_emb[:len_seq, :], requires_grad=False)
+            out = word_emb + self.pos_emb[:len_seq, :].type_as(word_emb)
         else:
             # out = word_emb + Variable(self.pos_emb[:len_seq, :][-1, :], requires_grad=False)
-            time_emb = Variable(self.pos_emb[len_seq-1, :], requires_grad=False) # 1 x dim
+            time_emb = self.pos_emb[len_seq-1, :] # 1 x dim
             # out should have size bs x 1 x dim
-            out = word_emb + time_emb.unsqueeze(0).repeat(word_emb.size(0), 1, 1)
+            out = word_emb + time_emb.unsqueeze(0).repeat(word_emb.size(0), 1, 1).type_as(word_emb)
         return out
